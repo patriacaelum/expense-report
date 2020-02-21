@@ -25,9 +25,6 @@ class ExpenseReport:
         self.expenses = list()
         self.figures = list()
 
-    def write(self):
-        pass
-
     def generate_report(self):
         self._categorize_expenses()
         self._generate_graphs()
@@ -54,20 +51,23 @@ class ExpenseReport:
                 if row['Date'].strip() != "":
                     date = row['Date']
 
-                cat, subcat, expense = self.catman.query(expense)
+                query = self.catman.query(expense)
+
+                if query is None:
+                    self.catman.add(expense, price)
+                    query = self.catman.query(expense)
+                else:
+                    self.catman.update(expense, price)
 
                 self.expenses.append(Expense(
                     date=date,
-                    cat=cat,
-                    subcat=subcat,
+                    cat=query['cat'],
+                    subcat=query['subcat'],
                     expense=expense,
                     price=price
                 ))
 
         logger.info(f'Successfully categorized expenses from {self.filename}')
-
-        # Update category manager
-        self.catman.write()
 
     def _generate_graphs(self):
         logger.debug('Creating pie charts for overall and categorical expenses')
@@ -179,8 +179,12 @@ class ExpenseReport:
         texgen.add_header()
         texgen.add_title(self.filename[:-4].replace('_', ' ').title())
 
+        texgen.add_section('Expense Charts')
+
         for filename in self.figures:
             texgen.add_figure(filename)
+
+        texgen.add_section('Expense Data')
 
         # Reorganize data with date first
         total = 0

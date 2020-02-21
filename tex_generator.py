@@ -47,6 +47,11 @@ class TexGenerator:
 
 """
 
+    def add_section(self, section):
+        logger.debug('Adding section')
+
+        self.text += f'\n\\section{{section}}'
+
     def add_figure(self, filename):
         logger.debug(f'Adding a figure from {filename}')
 
