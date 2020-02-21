@@ -8,150 +8,160 @@ logger = logging.getLogger(__name__)
 
 
 class CategoryManager:
-    """A JSON based manager for categories.
+    """A json-based manager for categories.
 
     This class is meant to handle all file reading and writing regarding the
     categories, and for querying and adding categories as needed.
 
-    The data is at most two levels deep, enough for a category and a
-    subcategory. The data is split into cats, which maps subcategories to their
-    respective categories, and subcats, which maps expenses to their respective
-    subcategories.
+    The data is stored in a dictionary with the structure
 
-    filename: (str) the name of the JSON file that stores the categories.
+    {
+        expense: {
+            'cat': category,
+            'subcat': subcategory,
+            'mean': average price,
+            'npurchases': number of purchases,
+        }
+    }
+
+    filename: (str) the name of the file that stores the categories.
     """
     def __init__(self, filename='cats.json'):
         self.filename = filename
 
         try:
-            logger.debug(f'Loading category data from {self.filename}')
-
+            logger.info(f'Loading data from {self.filename}')
             with open(self.filename, 'r') as file:
-                data = json.load(file)
+                self.expenses = json.load(file)
         except FileNotFoundError:
-            logger.warning(f'{self.filename} not found, using empty data set')
-            data = dict()
+            logger.warn(
+                f'{self.filename} could not be found, creating empty data set'
+            )
+            self.expenses = dict()
 
-        logger.debug('Sorting data into categories and subcategories')
+        logger.debug('Creating quick lookup table for categories')
 
         self.cats = dict()
-        self.subcats = dict()
-        for cat, catval in data.items():
-            for subcat, subval in catval.items():
-                self.cats[subcat] = cat
+        for value in self.expenses.values():
+            cat = value['cat']
+            subcat = value['subcat']
 
-                for expense in subval:
-                    self.subcats[expense] = subcat
+            if self.cats.get(cat) is None:
+                self.cats[cat] = [subcat,]
+            elif subcat not in self.cats[cat]:
+                self.cats[cat].append(subcat)
 
-        logger.info('Successfully sorted data into categories and subcategories')
+        print(self.cats)
 
-    def write(self):
-        """Writes JSON data to the file.
+    def __del__(self):
+        with open(self.filename, 'w') as file:
+            json.dump(self.expenses, file)
 
-        No file is created if there is no data.
+    def add(self, expense, price):
+        """Adds an expense to the currently stored categories and subcategories.
 
-        The data is reformatted into a hierarchial tree.
+        expense: (str)   the expense.
+        price:   (float) the price of expense.
         """
-        data = dict()
+        print(f'\nCreating new expense "{expense}"')
 
-        logger.debug('Sorting categories and subcategories into hierarchial tree')
-
-        for expense, subcat in self.subcats.items():
-            if subcat not in data.keys():
-                data[subcat] = [expense]
-            else:
-                data[subcat].append(expense)
-
-        for subcat, cat in self.cats.items():
-            if cat not in data.keys():
-                data[cat] = dict()
-
-            data[cat].update({subcat: data[subcat]})
-            del data[subcat]
-
-        logger.info('Successfully sorted categories and subcategories into a hierarchial tree')
-
-
-        if len(self.cats) != 0:
-            logger.info(f'Writing data to {self.filename}')
-
-            with open(self.filename, 'w') as file:
-                json.dump(data, file)
-
-    def query(self, query):
-        """Looks for the category and subcategory of the queried expense.
-
-        If it doesn't exist, then the user will be asked to provide one.
-
-        query: (str) the expense.
-        """
-        query = query
-
-        subcat = self.subcats.get(query)
-        cat = self.cats.get(subcat)
-
-        if cat is None or subcat is None:
-            matches = get_close_matches(query, self.subcats.keys())
-
-            if len(matches) == 0:
-                print(f'\nNo matches for "{query}", adding a new category')
-                cat, subcat = self._add_query(query)
-            else:
-                print(f'\nNo matches for "{query}", did you mean one of these?')
-
-                for i in range(len(matches)):
-                    print(f'{i+1}) {matches[i]}')
-
-                print(f'{i+2}) None of the above')
-
-                choice = int(input(f'\n[1-{i+2}]: '))
-
-                if choice == len(matches) + 1:
-                    cat, subcat = self._add_query(query)
-                else:
-                    query = matches[choice - 1]
-                    subcat = self.subcats.get(query)
-                    cat = self.cats.get(subcat)
-
-        return cat, subcat, query
-
-    def _add_query(self, query):
-        """Updates the currently stored categories and subcategories.
-
-        query: (str) the expense.
-        """
         # Determine category
-        cats = list(sorted(set(self.cats.values())))
-        cat = self._get_input(query, 'category', cats)
+        cats = list(sorted(self.cats.keys()))
+        cat = self._get_input(expense, 'category', cats)
 
         # Determine subcategory
-        subcats = list(sorted(
-            [key for key, value in self.cats.items() if value == cat]
-        ))
-        subcat = self._get_input(query, 'subcategory', subcats)
+        subcats = list(sorted(self.cats.get(cat, list())))
+        subcat = self._get_input(expense, 'subcategory', subcats)
 
         # Update categories
         logger.debug('Updating categories and subcategories')
 
-        if cat not in cats:
-            self.cats[subcat] = cat
+        self.expenses[expense] = {
+            'cat': cat,
+            'subcat': subcat,
+            'mean': price,
+            'npurchases': 1,
+        }
 
-        if subcat not in subcats:
-            self.cats[subcat] = cat
+        if cat not in self.cats.keys():
+            self.cats[cat] = list()
 
-        self.subcats[query] = subcat
+        if subcat not in self.cats[cat]:
+            self.cats[cat].append(subcat)
 
-        return cat, subcat
+    def query(self, expense):
+        """Looks for category information of the queried expense.
 
-    def _get_input(self, query, ntype, choices=list()):
+        If it doesn't exist, then the user will be asked to provide the
+        information.
+
+        expense: (str)   the expense.
+
+        return: (dict) the category information of the expense, `None` if the
+                       expense does not exist.
+        """
+        expense = expense.lower()
+        query = self.expenses.get(expense)
+
+        if query is None:
+            logger.debug('No exact match for "{expense}", look for typo')
+
+            matches = get_close_matches(expense, self.expenses.keys())
+            nmatches = len(matches)
+
+            if nmatches > 0:
+                print(f'\nNo matches for "{expense}", did you mean:')
+
+                for i in range(nmatches):
+                    print(f'{i+1}) {matches[i]}')
+
+                print(f'{nmatches+1}) None of the above')
+
+                valid = False
+                while not valid:
+                    choice = input(f'\n[1-{nmatches+1}]: ')
+
+                    try:
+                        choice = int(choice)
+                    except:
+                        print(f'\n{choice} is invalid')
+                        continue
+
+                    if 1 <= choice <=nmatches + 1:
+                        valid = True
+                    else:
+                        print(f'\n{choice} is invalid')
+
+                if choice != nmatches + 1:
+                    query = self.expenses.get(f'{matches[choice-1]}')
+
+        return query
+
+    def update(self, expense, price):
+        """Updates the category information of the expense.
+
+        The mean price and number of purchases is updated for the expense.
+
+        expense: (str)   the expense.
+        price:   (float) the price of the expense.
+        """
+        m = self.expenses[expense]['mean']
+        N = self.expenses[expense]['npurchases']
+
+        self.expenses[expense]['mean'] = (N * m + price) / (N + 1)
+        self.expenses[expense]['npurchases'] = N + 1
+
+    def _get_input(self, expense, ntype, choices=list()):
         """Asks the user to provide a category and subcategory for the expense.
 
         It will ask to choose from a list of existing choices or to provide a
         new one entirely.
 
-        query:   (str) the expense.
-        ntype:   (str) what we're asking for, i.e. "category" or "subcategory".
+        expense: (str)  the expense.
+        ntype:   (str)  what we're asking for, i.e. "category" or "subcategory".
         choices: (list) the existing possibilities.
+
+        return: (str) the category or subcategory from the user.
         """
         valid = False
         nchoices = len(choices)
@@ -159,20 +169,27 @@ class CategoryManager:
         while not valid:
             if nchoices == 0:
                 choice = input(
-                    f'\nPlease specify a {ntype} for "{query}": '
+                    f'\nPlease specify a {ntype} for "{expense}": '
                 ).lower()
 
-                if choice not in set(self.cats.values()) and choice not in self.cats.keys():
+                names = set()
+                for cat, subcats in self.cats.items():
+                    names.add(cat)
+
+                    for subcat in subcats:
+                        names.add(subcat)
+
+                if choice not in names:
                     valid = True
                 else:
                     print(f'\n{choice} is invalid because it already exists')
 
             else:
-                print(f'\nPlease choose an {ntype} for "{query}":')
+                print(f'\nPlease choose an {ntype} for "{expense}":')
                 for i in range(nchoices):
                     print(f'{i+1}) {choices[i]}')
 
-                print(f'{i+2}) None of the above')
+                print(f'{nchoices+1}) None of the above')
 
                 choice = input(f'\n[1-{nchoices+1}]: ')
 
@@ -186,7 +203,7 @@ class CategoryManager:
                     nchoices = 0
                     continue
                 elif 1 <= choice <= nchoices:
-                    choice = choices[choice - 1]
+                    choice = choices[choice-1]
                     valid = True
                 else:
                     print(f'\n{choice} is an invalid choice')
